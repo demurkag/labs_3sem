@@ -23,7 +23,8 @@ double majority_class(
     return classes[best];
 }
 
-void DecisionStump::fit(const Matrix &features, std::span<const double> target)
+void DecisionStump::fit(const Matrix &features,
+                        std::span<const double> target)
 {
     const std::size_t num_samples = features.rows();
     const std::size_t num_features = features.cols();

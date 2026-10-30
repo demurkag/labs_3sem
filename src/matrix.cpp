@@ -14,34 +14,90 @@ std::size_t Matrix::index(std::size_t row, std::size_t col) const
     return col * rows_ + row;
 }
 
-double &Matrix::operator()(std::size_t row, std::size_t col)
+double &Matrix::operator()(std::size_t row, std::size_t col) &
 {
-    if (row >= rows_ || col >= cols_)
-    {
-        throw std::out_of_range("Индекс матрицы находится вне диапазона");
-    }
-
     if (layout_ == Layout::RowMajor)
     {
         return data_[row * cols_ + col];
     }
-
     return data_[col * rows_ + row];
 }
 
-const double &Matrix::operator()(std::size_t row, std::size_t col) const
+const double &Matrix::operator()(std::size_t row, std::size_t col) const &
 {
-    if (row >= rows_ || col >= cols_)
-    {
-        throw std::out_of_range("Индекс матрицы находится вне диапазона");
-    }
-
     if (layout_ == Layout::RowMajor)
     {
         return data_[row * cols_ + col];
     }
-
     return data_[col * rows_ + row];
+}
+
+MatrixSlice<double> Matrix::operator()(std::size_t row, std::nullopt_t) &
+{
+    if (row >= rows_)
+    {
+        throw std::out_of_range("Индекс строки вне диапазона");
+    }
+
+    if (cols_ == 0)
+    {
+        return MatrixSlice<double>(nullptr, 0, 1, SliceAxis::Row);
+    }
+
+    std::size_t stride = (layout_ == Layout::RowMajor) ? 1 : rows_;
+
+    return MatrixSlice<double>(&data_[index(row, 0)], cols_, stride, SliceAxis::Row);
+}
+
+MatrixSlice<const double> Matrix::operator()(std::size_t row, std::nullopt_t) const &
+{
+    if (row >= rows_)
+    {
+        throw std::out_of_range("Индекс строки вне диапазона");
+    }
+
+    if (cols_ == 0)
+    {
+        return MatrixSlice<const double>(nullptr, 0, 1, SliceAxis::Row);
+    }
+
+    std::size_t stride = (layout_ == Layout::RowMajor) ? 1 : rows_;
+
+    return MatrixSlice<const double>(&data_[index(row, 0)], cols_, stride, SliceAxis::Row);
+}
+
+MatrixSlice<double> Matrix::operator()(std::nullopt_t, std::size_t col) &
+{
+    if (col >= cols_)
+    {
+        throw std::out_of_range("Индекс столбца вне диапазона");
+    }
+
+    if (rows_ == 0)
+    {
+        return MatrixSlice<double>(nullptr, 0, 1, SliceAxis::Column);
+    }
+
+    std::size_t stride = (layout_ == Layout::ColumnMajor) ? 1 : cols_;
+
+    return MatrixSlice<double>(&data_[index(0, col)], rows_, stride, SliceAxis::Column);
+}
+
+MatrixSlice<const double> Matrix::operator()(std::nullopt_t, std::size_t col) const &
+{
+    if (col >= cols_)
+    {
+        throw std::out_of_range("Индекс столбца вне диапазона");
+    }
+
+    if (rows_ == 0)
+    {
+        return MatrixSlice<const double>(nullptr, 0, 1, SliceAxis::Column);
+    }
+
+    std::size_t stride = (layout_ == Layout::ColumnMajor) ? 1 : cols_;
+
+    return MatrixSlice<const double>(&data_[index(0, col)], rows_, stride, SliceAxis::Column);
 }
 
 std::span<double> Matrix::operator[](std::size_t row)

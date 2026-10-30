@@ -5,11 +5,13 @@
  */
 
 #include "enums.hpp"
+#include "matrix_slice.hpp"
 
 #include <string>
 #include <vector>
 #include <filesystem>
 #include <span>
+#include <optional>
 
 /**
  * @brief Плотная матрица double с порядком хранения RowMajor или ColumnMajor.
@@ -49,27 +51,23 @@ public:
           cols_(cols),
           layout_(layout) {}
 
-    /**
-     * @brief Предоставляет изменяемый элемент с проверкой обоих индексов.
-     * @param row Индекс строки с нуля.
-     * @param column Индекс столбца с нуля.
-     * @return Ссылка на элемент.
-     * @throws std::out_of_range Если индекс выходит за размеры матрицы.
-     */
-    double &operator()(
-        std::size_t row,
-        std::size_t column);
+    double &operator()(std::size_t row, std::size_t col) &;
+    const double &operator()(std::size_t row, std::size_t col) const &;
 
-    /**
-     * @brief Читает элемент с проверкой обоих индексов.
-     * @param row Индекс строки с нуля.
-     * @param column Индекс столбца с нуля.
-     * @return Константная ссылка на элемент.
-     * @throws std::out_of_range Если индекс выходит за размеры матрицы.
-     */
-    const double &operator()(
-        std::size_t row,
-        std::size_t column) const;
+    double &operator()(std::size_t row, std::size_t col) && = delete;
+    const double &operator()(std::size_t row, std::size_t col) const && = delete;
+
+    MatrixSlice<double> operator()(std::size_t row, std::nullopt_t) &;
+    MatrixSlice<const double> operator()(std::size_t row, std::nullopt_t) const &;
+
+    MatrixSlice<double> operator()(std::size_t row, std::nullopt_t) && = delete;
+    MatrixSlice<const double> operator()(std::size_t row, std::nullopt_t) const && = delete;
+
+    MatrixSlice<double> operator()(std::nullopt_t, std::size_t col) &;
+    MatrixSlice<const double> operator()(std::nullopt_t, std::size_t col) const &;
+
+    MatrixSlice<double> operator()(std::nullopt_t, std::size_t col) && = delete;
+    MatrixSlice<const double> operator()(std::nullopt_t, std::size_t col) const && = delete;
 
     /**
      * @brief Возвращает изменяемое представление строки матрицы RowMajor.
@@ -119,6 +117,7 @@ public:
      * @return Число строк матрицы.
      */
     std::size_t rows() const { return rows_; }
+
     /** @brief Возвращает число столбцов.
      * @return Число столбцов матрицы.
      */
@@ -150,6 +149,7 @@ public:
      * @note Родительские каталоги не создаются.
      */
     void save(const std::filesystem::path &path) const;
+
     /**
      * @brief Загружает матрицу из бинарного файла.
      *

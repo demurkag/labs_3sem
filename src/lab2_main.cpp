@@ -120,6 +120,7 @@ int main()
 #else
     constexpr auto criterion = SplitCriterion::Gini;
 #endif
+
     DecisionStump model(criterion, 1);
 
     model.fit(X_train, y_train);
