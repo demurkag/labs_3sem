@@ -5,20 +5,12 @@
  */
 
 #include "imodel.hpp"
+#include "enums.hpp"
 
 #include <cstddef>
 #include <span>
 #include <vector>
 #include <stdexcept>
-
-/** @brief Задача и критерий выбора разбиения пня. */
-enum class SplitCriterion
-{
-    /** @brief Регрессия: минимизация квадратичной ошибки, в листьях средние отклики. */
-    Variance,
-    /** @brief Классификация: взвешенная нечистота Gini, в листьях наиболее частые метки. */
-    Gini
-};
 
 /**
  * @brief Модель с одним разбиением по признаку и порогу, реализующая IModel.
@@ -55,6 +47,10 @@ public:
         : criterion_(criterion),
           min_samples_leaf_(min_samples_leaf)
     {
+        if (criterion_ != SplitCriterion::Variance &&
+            criterion_ != SplitCriterion::Gini)
+            throw std::invalid_argument("Неизвестный критерий разбиения");
+
         if (min_samples_leaf_ == 0)
             throw std::invalid_argument("min_samples_leaf должен быть больше нуля");
     }
@@ -72,6 +68,7 @@ public:
      * При исключении гарантия сохранения прежнего состояния не предоставляется.
      */
     void fit(const Matrix &features, std::span<const double> target) override;
+
     /**
      * @brief Предсказывает по правилу: значение не больше порога относится к левому листу.
      * @param features Матрица с тем же числом и порядком признаков, что при fit().
@@ -87,10 +84,12 @@ public:
      * @return Индекс с нуля; значим только после успешного fit() при has_split().
      */
     std::size_t split_feature() const { return feature_index_; }
+
     /** @brief Возвращает порог выбранного разбиения.
      * @return Порог; значим только после успешного fit() при has_split().
      */
     double split_threshold() const { return threshold_; }
+
     /** @brief Сообщает, найдено ли разбиение.
      * @return false до обучения и при обучении без допустимого разбиения.
      */
@@ -100,6 +99,7 @@ public:
      * @return Среднее или метка класса; до обучения начальное значение 0, не прогноз.
      */
     double left_value() const { return left_value_; }
+
     /** @brief Возвращает предсказание правого листа.
      * @return Среднее или метка класса; без разбиения совпадает с левым листом после fit().
      */

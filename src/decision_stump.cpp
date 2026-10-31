@@ -1,10 +1,11 @@
 #include "decision_stump.hpp"
+#include "split_finder.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <numeric>
 #include <stdexcept>
 #include <vector>
-#include <numeric>
-#include <algorithm>
-#include <limits>
 
 double majority_class(
     const std::vector<std::size_t> &counts,
@@ -19,13 +20,27 @@ double majority_class(
             best = c;
         }
     }
-
     return classes[best];
+}
+
+void validate_finite_features(const Matrix &features)
+{
+    for (std::size_t i = 0; i < features.rows(); ++i)
+    {
+        for (std::size_t j = 0; j < features.cols(); ++j)
+        {
+            if (!std::isfinite(features(i, j)))
+                throw std::invalid_argument("Матрица содержит NaN или бесконечность");
+        }
+    }
 }
 
 void DecisionStump::fit(const Matrix &features,
                         std::span<const double> target)
 {
+    is_fitted_ = false;
+    has_split_ = false;
+
     const std::size_t num_samples = features.rows();
     const std::size_t num_features = features.cols();
 
@@ -39,10 +54,35 @@ void DecisionStump::fit(const Matrix &features,
         throw std::invalid_argument(
             "Количество строк features не совпадает с размером target");
 
+    for (double value : target)
+    {
+        if (!std::isfinite(value))
+            throw std::invalid_argument("Отклик содержит NaN или бесконечность");
+    }
+    validate_finite_features(features);
+
+    std::vector<std::size_t> object_ids(num_samples);
+    std::vector<std::size_t> feature_ids(num_features);
+
+    std::iota(object_ids.begin(), object_ids.end(), 0);
+    std::iota(feature_ids.begin(), feature_ids.end(), 0);
+
+    SplitFinder finder;
+    auto best_split = finder.find_best(features, target, object_ids, feature_ids,
+                                       criterion_, min_samples_leaf_);
+
+    has_split_ = best_split.has_value();
+
+    if (has_split_)
+    {
+        feature_index_ = best_split->feature;
+        threshold_ = best_split->threshold;
+    }
+
     double total_sum = 0.0;
 
-    std::vector<double> classes;                         // уникальные значения
-    std::vector<std::size_t> class_indices(num_samples); // объект -> индекс в классе
+    std::vector<double> classes;
+    std::vector<std::size_t> class_indices(num_samples);
     std::vector<std::size_t> class_counts;
 
     if (criterion_ == SplitCriterion::Variance)
@@ -72,116 +112,6 @@ void DecisionStump::fit(const Matrix &features,
 
             class_indices[i] = c;
             ++class_counts[c];
-        }
-    }
-
-    if (criterion_ == SplitCriterion::Gini && classes.size() == 1)
-    {
-        has_split_ = false;
-        left_value_ = classes[0];
-        right_value_ = classes[0];
-
-        n_features_ = num_features;
-        is_fitted_ = true;
-        return;
-    }
-
-    std::vector<std::size_t> order(num_samples);
-
-    double best_score = -std::numeric_limits<double>::infinity();
-
-    has_split_ = false;
-
-    for (std::size_t j = 0; j < num_features; ++j)
-    {
-        std::iota(order.begin(), order.end(), 0);
-
-        std::sort(order.begin(), order.end(),
-                  [&features, j](std::size_t a, std::size_t b)
-                  {
-                      return features(a, j) < features(b, j);
-                  });
-
-        double left_sum = 0.0;
-        std::size_t left_count = 0;
-
-        std::vector<std::size_t> left_classes(classes.size(), 0);
-        std::vector<std::size_t> right_classes = class_counts;
-
-        double left_squared = 0.0;
-        double right_squared = 0.0;
-
-        if (criterion_ == SplitCriterion::Gini)
-        {
-            for (std::size_t count : class_counts)
-            {
-                right_squared += static_cast<double>(count) * count;
-            }
-        }
-
-        for (std::size_t i = 0; i + 1 < num_samples; ++i)
-        {
-            const std::size_t row = order[i];
-
-            ++left_count;
-
-            if (criterion_ == SplitCriterion::Variance)
-            {
-                left_sum += target[row];
-            }
-            else if (criterion_ == SplitCriterion::Gini)
-            {
-                const std::size_t c = class_indices[row];
-
-                const std::size_t a = left_classes[c];
-                const std::size_t b = right_classes[c];
-
-                left_squared += 2.0 * a + 1.0;
-                right_squared += 1.0 - 2.0 * b;
-
-                ++left_classes[c];
-                --right_classes[c];
-            }
-
-            const std::size_t right_count = num_samples - left_count;
-
-            if (left_count < min_samples_leaf_ || right_count < min_samples_leaf_)
-            {
-                continue;
-            }
-
-            const double current_value = features(order[i], j);
-            const double next_value = features(order[i + 1], j);
-
-            if (current_value == next_value)
-            {
-                continue;
-            }
-
-            double score = 0.0;
-
-            if (criterion_ == SplitCriterion::Variance)
-            {
-                const double right_sum = total_sum - left_sum;
-
-                score =
-                    left_sum * left_sum / left_count +
-                    right_sum * right_sum / right_count;
-            }
-            else if (criterion_ == SplitCriterion::Gini)
-            {
-                score =
-                    left_squared / left_count +
-                    right_squared / right_count;
-            }
-
-            if (!has_split_ || score > best_score)
-            {
-                best_score = score;
-                feature_index_ = j;
-                threshold_ = std::midpoint(current_value, next_value);
-                has_split_ = true;
-            }
         }
     }
 
@@ -265,6 +195,8 @@ std::vector<double> DecisionStump::predict(const Matrix &features) const
         throw std::invalid_argument(
             "Количество признаков не совпадает с обучающей выборкой");
     }
+
+    validate_finite_features(features);
 
     std::vector<double> predictions(features.rows());
 
