@@ -77,15 +77,15 @@ std::optional<Split> SplitFinder::find_best(
         }
     }
 
-    if (all_equal)
+    if (criterion == SplitCriterion::Gini && all_equal)
     {
         return std::nullopt;
     }
 
     double total_sum = 0.0;
 
-    std::vector<double> classes;                      // уникальные значения
-    std::vector<std::size_t> class_indices(X.rows()); // объект -> индекс в классе
+    std::vector<double> classes;
+    std::vector<std::size_t> class_indices;
     std::vector<std::size_t> class_counts;
 
     if (criterion == SplitCriterion::Variance)
@@ -110,6 +110,10 @@ std::optional<Split> SplitFinder::find_best(
 
         class_counts.assign(classes.size(), 0);
 
+        // Индексы классов хранятся в порядке object_ids,
+        // а не по глобальным индексам строк матрицы.
+        class_indices.reserve(num_samples);
+
         for (std::size_t i : object_ids)
         {
             const auto it = std::lower_bound(
@@ -117,23 +121,26 @@ std::optional<Split> SplitFinder::find_best(
 
             const std::size_t c = it - classes.begin();
 
-            class_indices[i] = c;
+            class_indices.push_back(c);
             ++class_counts[c];
         }
     }
 
+    // order содержит локальные позиции объектов
+    // в object_ids: 0, 1, ..., num_samples - 1.
     std::vector<std::size_t> order(num_samples);
 
     std::optional<Split> best_split;
 
     for (std::size_t j : feature_ids)
     {
-        std::copy(object_ids.begin(), object_ids.end(), order.begin());
+        std::iota(order.begin(), order.end(), 0);
 
         std::sort(order.begin(), order.end(),
-                  [&X, j](std::size_t a, std::size_t b)
+                  [&X, &object_ids, j](std::size_t a, std::size_t b)
                   {
-                      return X(a, j) < X(b, j);
+                      return X(object_ids[a], j) <
+                             X(object_ids[b], j);
                   });
 
         double left_sum = 0.0;
@@ -155,7 +162,11 @@ std::optional<Split> SplitFinder::find_best(
 
         for (std::size_t i = 0; i + 1 < num_samples; ++i)
         {
-            const std::size_t row = order[i];
+            // Позиция объекта в object_ids.
+            const std::size_t local_index = order[i];
+
+            // Настоящий номер строки объекта в матрице X.
+            const std::size_t row = object_ids[local_index];
 
             ++left_count;
 
@@ -165,7 +176,8 @@ std::optional<Split> SplitFinder::find_best(
             }
             else
             {
-                const std::size_t c = class_indices[row];
+                // class_indices индексируется локальной позицией.
+                const std::size_t c = class_indices[local_index];
 
                 const std::size_t a = left_classes[c];
                 const std::size_t b = right_classes[c];
@@ -185,8 +197,10 @@ std::optional<Split> SplitFinder::find_best(
                 continue;
             }
 
-            const double current_value = X(order[i], j);
-            const double next_value = X(order[i + 1], j);
+            // order хранит локальные позиции, поэтому
+            // получаем глобальные индексы через object_ids.
+            const double current_value = X(object_ids[order[i]], j);
+            const double next_value = X(object_ids[order[i + 1]], j);
 
             if (current_value == next_value)
                 continue;

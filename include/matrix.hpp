@@ -51,22 +51,62 @@ public:
           cols_(cols),
           layout_(layout) {}
 
+    /** @brief Изменяемый доступ без проверки границ для обоих layout.
+     * @param row Индекс строки с нуля, меньше rows().
+     * @param col Индекс столбца с нуля, меньше cols().
+     * @return Ссылка на элемент; вызов на временной матрице запрещён.
+     */
     double &operator()(std::size_t row, std::size_t col) &;
+    /** @brief Доступ только для чтения без проверки границ для обоих layout.
+     * @param row Индекс строки с нуля, меньше rows().
+     * @param col Индекс столбца с нуля, меньше cols().
+     * @return Константная ссылка; вызов на временной матрице запрещён.
+     */
     const double &operator()(std::size_t row, std::size_t col) const &;
 
+    /** @brief Запрещает ссылку на элемент временной матрицы. */
     double &operator()(std::size_t row, std::size_t col) && = delete;
+    /** @brief Запрещает ссылку на элемент константной временной матрицы. */
     const double &operator()(std::size_t row, std::size_t col) const && = delete;
 
+    /** @brief Создаёт невладеющий изменяемый срез строки для обоих layout.
+     * @param row Индекс строки с нуля.
+     * @return Срез длины cols(); шаг 1 для RowMajor, rows() для ColumnMajor.
+     * При cols()==0 возвращается пустой срез с шагом 1.
+     * @throws std::out_of_range row не меньше rows().
+     * @note Без копирования; время жизни ограничено буфером матрицы.
+     */
     MatrixSlice<double> operator()(std::size_t row, std::nullopt_t) &;
+    /** @brief Создаёт срез строки только для чтения.
+     * @param row Индекс строки с нуля.
+     * @return Срез const double с размером и шагом изменяемой перегрузки.
+     * @throws std::out_of_range row не меньше rows().
+     */
     MatrixSlice<const double> operator()(std::size_t row, std::nullopt_t) const &;
 
+    /** @brief Запрещает срез строки временной матрицы. */
     MatrixSlice<double> operator()(std::size_t row, std::nullopt_t) && = delete;
+    /** @brief Запрещает срез строки константной временной матрицы. */
     MatrixSlice<const double> operator()(std::size_t row, std::nullopt_t) const && = delete;
 
+    /** @brief Создаёт невладеющий изменяемый срез столбца для обоих layout.
+     * @param col Индекс столбца с нуля.
+     * @return Срез длины rows(); шаг cols() для RowMajor, 1 для ColumnMajor.
+     * При rows()==0 возвращается пустой срез с шагом 1.
+     * @throws std::out_of_range col не меньше cols().
+     * @note Без копирования; время жизни ограничено буфером матрицы.
+     */
     MatrixSlice<double> operator()(std::nullopt_t, std::size_t col) &;
+    /** @brief Создаёт срез столбца только для чтения.
+     * @param col Индекс столбца с нуля.
+     * @return Срез const double с размером и шагом изменяемой перегрузки.
+     * @throws std::out_of_range col не меньше cols().
+     */
     MatrixSlice<const double> operator()(std::nullopt_t, std::size_t col) const &;
 
+    /** @brief Запрещает срез столбца временной матрицы. */
     MatrixSlice<double> operator()(std::nullopt_t, std::size_t col) && = delete;
+    /** @brief Запрещает срез столбца константной временной матрицы. */
     MatrixSlice<const double> operator()(std::nullopt_t, std::size_t col) const && = delete;
 
     /**
@@ -80,7 +120,7 @@ public:
      *
      * @throws std::runtime_error Если порядок хранения не RowMajor.
      */
-    std::span<double> operator[](std::size_t row);
+    std::span<double> operator[](std::size_t row) &;
 
     /**
      * @brief Возвращает представление строки матрицы RowMajor только для чтения.
@@ -93,7 +133,10 @@ public:
      *
      * @throws std::runtime_error Если порядок хранения не RowMajor.
      */
-    std::span<const double> operator[](std::size_t row) const;
+    std::span<const double> operator[](std::size_t row) const &;
+
+    std::span<double> operator[](std::size_t row) && = delete;
+    std::span<const double> operator[](std::size_t row) const && = delete;
 
     /**
      * @brief Предоставляет изменяемый элемент с проверкой границ для обоих Layout.
@@ -102,7 +145,7 @@ public:
      * @return Ссылка на элемент.
      * @throws std::out_of_range Если row >= rows() или col >= cols().
      */
-    double &at(std::size_t row, std::size_t col);
+    double &at(std::size_t row, std::size_t col) &;
 
     /**
      * @brief Читает элемент с проверкой границ для обоих Layout.
@@ -111,7 +154,10 @@ public:
      * @return Константная ссылка на элемент.
      * @throws std::out_of_range Если row >= rows() или col >= cols().
      */
-    const double &at(std::size_t row, std::size_t col) const;
+    const double &at(std::size_t row, std::size_t col) const &;
+
+    double &at(std::size_t row, std::size_t col) && = delete;
+    const double &at(std::size_t row, std::size_t col) const && = delete;
 
     /** @brief Возвращает число строк.
      * @return Число строк матрицы.
@@ -129,13 +175,16 @@ public:
      * @warning Нельзя изменять размер буфера, поскольку это нарушает
      * соответствие данных размерам матрицы.
      */
-    std::vector<double> &data() { return data_; }
+    std::vector<double> &data() & { return data_; }
 
     /**
      * @brief Предоставляет доступ к физическому буферу для чтения.
      * @return Константная ссылка на вектор элементов.
      */
-    const std::vector<double> &data() const { return data_; }
+    const std::vector<double> &data() const & { return data_; }
+
+    std::vector<double> &data() && = delete;
+    const std::vector<double> &data() const && = delete;
 
     /**
      * @brief Сохраняет матрицу в бинарный файл.

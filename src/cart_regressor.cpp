@@ -38,3 +38,14 @@ std::vector<double> CartRegressor::predict(
 
     return predictions;
 }
+
+TreeStats CartRegressor::stats() const
+{
+    return tree_.stats();
+}
+
+std::vector<SplitInfo> CartRegressor::first_splits(
+    std::size_t limit) const
+{
+    return tree_.first_splits(limit);
+}

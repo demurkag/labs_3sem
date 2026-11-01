@@ -58,14 +58,21 @@ std::unique_ptr<Node> CartTree::make_leaf(
 
     if (criterion_ == SplitCriterion::Variance)
     {
-        double sum = 0.0;
+        double mean = 0.0;
+        double count = static_cast<double>(object_ids.size());
 
         for (std::size_t i : object_ids)
         {
-            sum += y[i];
+            mean += y[i] / count;
         }
 
-        node->value = sum / object_ids.size();
+        if (!std::isfinite(mean))
+        {
+            throw std::overflow_error(
+                "Не удалось вычислить конечное среднее откликов");
+        }
+
+        node->value = mean;
     }
     else if (criterion_ == SplitCriterion::Gini)
     {
@@ -85,6 +92,11 @@ std::unique_ptr<Node> CartTree::make_leaf(
         {
             probability /= object_ids.size();
         }
+    }
+
+    if (!node->is_valid())
+    {
+        throw std::logic_error("Некорректное состояние листа");
     }
 
     return node;
@@ -158,6 +170,11 @@ std::unique_ptr<Node> CartTree::build_tree(
 
     node->right = build_tree(
         X, y, right_ids, feature_ids, depth + 1);
+
+    if (!node->is_valid())
+    {
+        throw std::logic_error("Некорректное состояние узла");
+    }
 
     return node;
 }
@@ -277,4 +294,94 @@ const Node &CartTree::find_leaf(
     }
 
     return *current;
+}
+
+void CartTree::collect_stats(
+    const Node *node,
+    std::size_t depth,
+    TreeStats &result) const
+{
+    if (node == nullptr)
+    {
+        return;
+    }
+
+    ++result.node_count;
+
+    result.depth = std::max(result.depth, depth);
+
+    if (node->is_leaf)
+    {
+        ++result.leaf_count;
+        return;
+    }
+
+    collect_stats(
+        node->left.get(),
+        depth + 1,
+        result);
+
+    collect_stats(
+        node->right.get(),
+        depth + 1,
+        result);
+}
+
+TreeStats CartTree::stats() const
+{
+    if (!is_fitted())
+    {
+        throw std::logic_error("Дерево ещё не обучено");
+    }
+
+    TreeStats result;
+
+    collect_stats(root_.get(), 0, result);
+
+    return result;
+}
+
+void CartTree::collect_splits(
+    const Node *node,
+    std::size_t depth,
+    std::size_t limit,
+    std::vector<SplitInfo> &result) const
+{
+    if (node == nullptr ||
+        node->is_leaf ||
+        result.size() >= limit)
+    {
+        return;
+    }
+
+    result.push_back({depth,
+                      node->feature,
+                      node->threshold});
+
+    collect_splits(
+        node->left.get(),
+        depth + 1,
+        limit,
+        result);
+
+    collect_splits(
+        node->right.get(),
+        depth + 1,
+        limit,
+        result);
+}
+
+std::vector<SplitInfo> CartTree::first_splits(
+    std::size_t limit) const
+{
+    if (!is_fitted())
+    {
+        throw std::logic_error("Дерево ещё не обучено");
+    }
+
+    std::vector<SplitInfo> result;
+
+    collect_splits(root_.get(), 0, limit, result);
+
+    return result;
 }

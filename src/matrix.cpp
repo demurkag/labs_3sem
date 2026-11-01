@@ -100,7 +100,7 @@ MatrixSlice<const double> Matrix::operator()(std::nullopt_t, std::size_t col) co
     return MatrixSlice<const double>(&data_[index(0, col)], rows_, stride, SliceAxis::Column);
 }
 
-std::span<double> Matrix::operator[](std::size_t row)
+std::span<double> Matrix::operator[](std::size_t row) &
 {
     if (layout_ != Layout::RowMajor)
     {
@@ -111,7 +111,7 @@ std::span<double> Matrix::operator[](std::size_t row)
     return {data_.data() + row * cols_, cols_};
 }
 
-std::span<const double> Matrix::operator[](std::size_t row) const
+std::span<const double> Matrix::operator[](std::size_t row) const &
 {
     if (layout_ != Layout::RowMajor)
     {
@@ -122,7 +122,7 @@ std::span<const double> Matrix::operator[](std::size_t row) const
     return {data_.data() + row * cols_, cols_};
 }
 
-double &Matrix::at(std::size_t row, std::size_t col)
+double &Matrix::at(std::size_t row, std::size_t col) &
 {
     if (row >= rows_ || col >= cols_)
     {
@@ -138,7 +138,7 @@ double &Matrix::at(std::size_t row, std::size_t col)
     return data_[index(row, col)];
 }
 
-const double &Matrix::at(std::size_t row, std::size_t col) const
+const double &Matrix::at(std::size_t row, std::size_t col) const &
 {
     if (row >= rows_ || col >= cols_)
     {

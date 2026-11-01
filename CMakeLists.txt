@@ -8,7 +8,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(core STATIC
     src/dataset.cpp
     src/matrix.cpp
+    src/matrix_slice.cpp
     src/decision_stump.cpp
+    src/split_finder.cpp
+    src/cart_tree.cpp
+    src/cart_classifier.cpp
+    src/cart_regressor.cpp
 )
 
 target_include_directories(core
@@ -36,6 +41,20 @@ endforeach()
 
 target_compile_definitions(lab2_variance PRIVATE LAB2_VARIANCE)
 
+# Лабораторная №3
+add_executable(lab3 src/lab3_main.cpp)
+target_link_libraries(lab3 PRIVATE core)
+target_compile_options(lab3 PRIVATE -Wall -Wextra)
+
+# Относительный путь data/data.csv разрешается от корня проекта.
+add_custom_target(run_lab3
+    COMMAND $<TARGET_FILE:lab3>
+    DEPENDS lab3
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    USES_TERMINAL
+    VERBATIM
+)
+
 # Тесты
 add_executable(tests
     tests/tests.cpp
@@ -48,13 +67,18 @@ add_executable(test_decision_stump tests/test_decision_stump.cpp)
 target_link_libraries(test_decision_stump PRIVATE core)
 target_compile_options(test_decision_stump PRIVATE -Wall -Wextra)
 
+add_executable(test_cart tests/test_cart.cpp)
+target_link_libraries(test_cart PRIVATE core)
+target_compile_options(test_cart PRIVATE -Wall -Wextra)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tests PRIVATE -UNDEBUG)
     target_compile_options(test_decision_stump PRIVATE -UNDEBUG)
+    target_compile_options(test_cart PRIVATE -UNDEBUG)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    foreach(target core app lab2 lab2_gini lab2_variance tests test_decision_stump)
+    foreach(target core app lab2 lab2_gini lab2_variance lab3 tests test_decision_stump test_cart)
         target_compile_options(${target} PRIVATE
             -fsanitize=address,undefined
             -fno-omit-frame-pointer
@@ -68,6 +92,7 @@ endif()
 enable_testing()
 add_test(NAME unit COMMAND tests)
 add_test(NAME decision_stump COMMAND test_decision_stump)
+add_test(NAME cart COMMAND test_cart)
 
 # Документация не входит в обычную сборку и не требует Graphviz.
 find_package(Doxygen QUIET)
