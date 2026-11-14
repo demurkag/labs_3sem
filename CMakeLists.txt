@@ -14,6 +14,7 @@ add_library(core STATIC
     src/cart_tree.cpp
     src/cart_classifier.cpp
     src/cart_regressor.cpp
+    src/random_forest_regressor.cpp
 )
 
 target_include_directories(core

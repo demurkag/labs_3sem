@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <span>
 #include <vector>
+#include <cstdint>
+#include <optional>
 
 /** @brief Регрессор IRegressor на основе CartTree с критерием Variance.
  * Предсказывает средние откликов в листьях. Владение, рекурсия и остановка
@@ -30,9 +32,11 @@ public:
      * @throws std::invalid_argument Недопустимые минимумы объектов.
      */
     CartRegressor(
-        std::size_t max_depth,
+        std::optional<std::size_t> max_depth,
         std::size_t min_samples_split,
-        std::size_t min_samples_leaf);
+        std::size_t min_samples_leaf,
+        FeatureSearchParams feature_search = {},
+        std::uint32_t random_state = 0);
 
     /** @brief Обучает дерево, сбрасывая прежнее состояние.
      * @param X Непустая матрица конечных признаков с хотя бы одним столбцом.
@@ -45,6 +49,11 @@ public:
     void fit(
         const Matrix &X,
         std::span<const double> y) override;
+
+    void fit_with_counts(
+        const Matrix &X,
+        std::span<const double> y,
+        std::span<const std::size_t> counts);
 
     /** @brief Предсказывает среднее обучающих откликов достигнутого листа.
      * @param X Конечные признаки с обучающим числом и порядком столбцов.

@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <span>
 #include <vector>
+#include <cstdint>
+#include <optional>
 
 /** @brief Классификатор IClassifier на основе CartTree с критерием Gini.
  * Конструктор не обучает модель. Остановка, владение узлами и общий поиск
@@ -28,9 +30,11 @@ public:
      * @throws std::invalid_argument Недопустимые минимумы объектов.
      */
     CartClassifier(
-        std::size_t max_depth,
+        std::optional<std::size_t> max_depth,
         std::size_t min_samples_split,
-        std::size_t min_samples_leaf);
+        std::size_t min_samples_leaf,
+        FeatureSearchParams feature_search = {},
+        std::uint32_t random_state = 0);
 
     /** @brief Обучает модель и заменяет прежнее состояние через CartTree::fit().
      * @param X Непустая матрица конечных признаков с хотя бы одним столбцом.
@@ -43,6 +47,11 @@ public:
     void fit(
         const Matrix &X,
         std::span<const double> y) override;
+
+    void fit_with_counts(
+        const Matrix &X,
+        std::span<const double> y,
+        std::span<const std::size_t> counts);
 
     /** @brief Возвращает исходные метки наиболее вероятных классов.
      * @param X Конечные признаки с тем же числом и порядком столбцов, что при fit().

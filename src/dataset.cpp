@@ -147,7 +147,7 @@ void Dataset::add_column(const std::string &name, const Column &col)
         // todo: раскрутка стека
     }
 
-    if (columns_.contains(name)) // защита от порторов
+    if (columns_.contains(name))
     {
         throw std::runtime_error("Дублирующееся имя столбца: " + name);
     }
@@ -290,7 +290,7 @@ Dataset load_dataset(
 
         if (col_name.empty())
         {
-            col_name = "id"; // в дальнейшем этот столбец вообще не должен играть роль и его не надо учитывать
+            col_name = "id";
         }
 
         auto &raw_data = raw_columns[j]; // один столбец

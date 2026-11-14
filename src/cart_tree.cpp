@@ -5,21 +5,35 @@
 #include <numeric>
 #include <stdexcept>
 #include <vector>
+#include <algorithm>
 
 CartTree::CartTree(
     SplitCriterion criterion,
-    std::size_t max_depth,
+    std::optional<std::size_t> max_depth,
     std::size_t min_samples_split,
-    std::size_t min_samples_leaf)
+    std::size_t min_samples_leaf,
+    FeatureSearchParams feature_search,
+    std::uint32_t random_state)
     : criterion_(criterion),
       max_depth_(max_depth),
       min_samples_split_(min_samples_split),
-      min_samples_leaf_(min_samples_leaf)
+      min_samples_leaf_(min_samples_leaf),
+      feature_search_(feature_search),
+      random_state_(random_state),
+      rng_(random_state)
 {
     if (criterion_ != SplitCriterion::Variance &&
         criterion_ != SplitCriterion::Gini)
     {
         throw std::invalid_argument("Неизвестный критерий разбиения");
+    }
+
+    if (feature_search_.mode != FeatureMode::All &&
+        feature_search_.mode != FeatureMode::Sqrt &&
+        feature_search_.mode != FeatureMode::Count)
+    {
+        throw std::invalid_argument(
+            "Неизвестный режим выбора признаков");
     }
 
     if (min_samples_split_ < 2)
@@ -33,6 +47,107 @@ CartTree::CartTree(
         throw std::invalid_argument(
             "min_samples_leaf должен быть больше нуля");
     }
+
+    if (feature_search_.mode == FeatureMode::Count &&
+        feature_search_.count == 0)
+    {
+        throw std::invalid_argument(
+            "Количество признаков должно быть больше нуля");
+    }
+}
+
+std::size_t CartTree::resolve_max_features(std::size_t d) const
+{
+    if (feature_search_.mode == FeatureMode::All)
+        return d;
+
+    if (feature_search_.mode == FeatureMode::Sqrt)
+        return std::max(
+            std::size_t{1},
+            static_cast<std::size_t>(std::sqrt(d)));
+
+    if (feature_search_.mode == FeatureMode::Count)
+        return feature_search_.count;
+
+    throw std::invalid_argument(
+        "Неизвестный режим выбора признаков");
+}
+
+std::optional<Split> CartTree::find_node_split(
+    const Matrix &X,
+    std::span<const double> y,
+    const std::vector<std::size_t> &object_ids,
+    const std::vector<std::size_t> &feature_ids,
+    std::span<const std::size_t> counts)
+{
+    const std::size_t q =
+        resolve_max_features(feature_ids.size());
+
+    if (feature_search_.mode == FeatureMode::All)
+    {
+        return finder_.find_best(
+            X, y, object_ids, feature_ids, criterion_, min_samples_leaf_, counts);
+    }
+
+    std::vector<std::size_t> shuffled_features = feature_ids;
+
+    std::shuffle(
+        shuffled_features.begin(),
+        shuffled_features.end(),
+        rng_);
+
+    std::optional<Split> best_split;
+    std::size_t viewed = 0;
+    bool has_non_constant = false;
+
+    for (const auto s : shuffled_features)
+    {
+        auto result = finder_.find_for_feature(
+            X, y, object_ids, s, criterion_, min_samples_leaf_, counts);
+
+        viewed++;
+
+        if (!result.is_constant)
+        {
+            has_non_constant = true;
+        }
+
+        if (result.best.has_value())
+        {
+            bool is_better = false;
+
+            if (!best_split)
+            {
+                is_better = true;
+            }
+            else if (result.best->score > best_split->score)
+            {
+                is_better = true;
+            }
+            else if (result.best->score == best_split->score)
+            {
+                if (result.best->feature < best_split->feature)
+                {
+                    is_better = true;
+                }
+                else if (result.best->feature == best_split->feature)
+                {
+                    if (result.best->threshold < best_split->threshold)
+                    {
+                        is_better = true;
+                    }
+                }
+            }
+
+            if (is_better)
+            {
+                best_split = result.best;
+            }
+        }
+        if (viewed >= q && has_non_constant)
+            break;
+    }
+    return best_split;
 }
 
 bool CartTree::is_fitted() const noexcept
@@ -52,18 +167,25 @@ std::span<const double> CartTree::classes() const
 
 std::unique_ptr<Node> CartTree::make_leaf(
     std::span<const double> y,
-    const std::vector<std::size_t> &object_ids)
+    const std::vector<std::size_t> &object_ids,
+    std::span<const std::size_t> counts)
 {
     auto node = std::make_unique<Node>();
+
+    double count = 0.0;
+
+    for (std::size_t i : object_ids)
+    {
+        count += counts[i];
+    }
 
     if (criterion_ == SplitCriterion::Variance)
     {
         double mean = 0.0;
-        double count = static_cast<double>(object_ids.size());
 
         for (std::size_t i : object_ids)
         {
-            mean += y[i] / count;
+            mean += y[i] * (counts[i] / count);
         }
 
         if (!std::isfinite(mean))
@@ -85,12 +207,12 @@ std::unique_ptr<Node> CartTree::make_leaf(
 
             std::size_t c = it - classes_.begin();
 
-            node->probabilities[c] += 1.0;
+            node->probabilities[c] += counts[i];
         }
 
         for (double &probability : node->probabilities)
         {
-            probability /= object_ids.size();
+            probability /= count;
         }
     }
 
@@ -107,12 +229,13 @@ std::unique_ptr<Node> CartTree::build_tree(
     std::span<const double> y,
     const std::vector<std::size_t> &object_ids,
     const std::vector<std::size_t> &feature_ids,
-    std::size_t depth)
+    std::size_t depth,
+    std::span<const std::size_t> counts)
 {
-    if (depth >= max_depth_ ||
+    if ((max_depth_.has_value() && depth >= *max_depth_) ||
         object_ids.size() < min_samples_split_)
     {
-        return make_leaf(y, object_ids);
+        return make_leaf(y, object_ids, counts);
     }
 
     bool all_equal = true;
@@ -128,20 +251,15 @@ std::unique_ptr<Node> CartTree::build_tree(
 
     if (all_equal)
     {
-        return make_leaf(y, object_ids);
+        return make_leaf(y, object_ids, counts);
     }
 
-    auto split = finder_.find_best(
-        X,
-        y,
-        object_ids,
-        feature_ids,
-        criterion_,
-        min_samples_leaf_);
+    auto split = find_node_split(
+        X, y, object_ids, feature_ids, counts);
 
     if (!split.has_value())
     {
-        return make_leaf(y, object_ids);
+        return make_leaf(y, object_ids, counts);
     }
 
     std::vector<std::size_t> left_ids;
@@ -166,10 +284,10 @@ std::unique_ptr<Node> CartTree::build_tree(
     node->threshold = split->threshold;
 
     node->left = build_tree(
-        X, y, left_ids, feature_ids, depth + 1);
+        X, y, left_ids, feature_ids, depth + 1, counts);
 
     node->right = build_tree(
-        X, y, right_ids, feature_ids, depth + 1);
+        X, y, right_ids, feature_ids, depth + 1, counts);
 
     if (!node->is_valid())
     {
@@ -211,15 +329,40 @@ void CartTree::fit(const Matrix &X, std::span<const double> y)
     n_features_ = 0;
     classes_.clear();
 
+    std::vector<std::size_t> counts(X.rows(), 1);
+
+    fit_with_counts(X, y, counts);
+}
+
+void CartTree::fit_with_counts(
+    const Matrix &X,
+    std::span<const double> y,
+    std::span<const std::size_t> counts)
+{
+    root_.reset();
+    n_features_ = 0;
+    classes_.clear();
+
+    rng_.seed(random_state_);
+
     if (X.rows() == 0)
         throw std::invalid_argument("Обучающая выборка пуста");
 
     if (X.cols() == 0)
         throw std::invalid_argument("Матрица не содержит признаков");
 
+    if (feature_search_.mode == FeatureMode::Count &&
+        feature_search_.count > X.cols())
+        throw std::invalid_argument(
+            "Количество выбираемых признаков превышает число столбцов");
+
     if (y.size() != X.rows())
         throw std::invalid_argument(
             "Количество строк матрицы X не совпадает с размером y");
+
+    if (counts.size() != X.rows())
+        throw std::invalid_argument(
+            "Количество элементов в counts не совпадает с количеством строк матрицы X");
 
     for (double value : y)
     {
@@ -237,6 +380,20 @@ void CartTree::fit(const Matrix &X, std::span<const double> y)
         }
     }
 
+    bool is_positive = false;
+    for (const std::size_t val : counts)
+    {
+        if (val > 0)
+        {
+            is_positive = true;
+            break;
+        }
+    }
+
+    if (!is_positive)
+        throw std::invalid_argument(
+            "Counts должен содержать хотя бы одну положительную кратность");
+
     if (criterion_ == SplitCriterion::Gini)
     {
         classes_.assign(y.begin(), y.end());
@@ -248,13 +405,18 @@ void CartTree::fit(const Matrix &X, std::span<const double> y)
             classes_.end());
     }
 
-    std::vector<std::size_t> object_ids(X.rows());
-    std::vector<std::size_t> feature_ids(X.cols());
+    std::vector<std::size_t> object_ids;
 
-    std::iota(object_ids.begin(), object_ids.end(), 0);
+    for (std::size_t i = 0; i < counts.size(); ++i)
+    {
+        if (counts[i] > 0)
+            object_ids.push_back(i);
+    }
+
+    std::vector<std::size_t> feature_ids(X.cols());
     std::iota(feature_ids.begin(), feature_ids.end(), 0);
 
-    root_ = build_tree(X, y, object_ids, feature_ids, 0);
+    root_ = build_tree(X, y, object_ids, feature_ids, 0, counts);
 
     n_features_ = X.cols();
 }

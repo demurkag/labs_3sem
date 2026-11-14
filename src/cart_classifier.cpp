@@ -5,14 +5,18 @@
 #include <vector>
 
 CartClassifier::CartClassifier(
-    std::size_t max_depth,
+    std::optional<std::size_t> max_depth,
     std::size_t min_samples_split,
-    std::size_t min_samples_leaf)
+    std::size_t min_samples_leaf,
+    FeatureSearchParams feature_search,
+    std::uint32_t random_state)
     : tree_(
           SplitCriterion::Gini,
           max_depth,
           min_samples_split,
-          min_samples_leaf)
+          min_samples_leaf,
+          feature_search,
+          random_state)
 {
 }
 
@@ -21,6 +25,14 @@ void CartClassifier::fit(
     std::span<const double> y)
 {
     tree_.fit(X, y);
+}
+
+void CartClassifier::fit_with_counts(
+    const Matrix &X,
+    std::span<const double> y,
+    std::span<const std::size_t> counts)
+{
+    tree_.fit_with_counts(X, y, counts);
 }
 
 std::vector<double> CartClassifier::predict(

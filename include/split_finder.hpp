@@ -20,6 +20,11 @@ struct Split // оптимальное разбиение
                          ///< Gini: сумма квадратов частот / размеров групп, суммируемая по сторонам.
 };
 
+struct FeatureSplitResult {
+    bool is_constant;
+    std::optional<Split> best;
+};
+
 /** @brief Ищет лучший порог без копирования подматрицы.
  * Сортирует индексы объектов для каждого разрешённого признака и обновляет
  * агрегаты при проходе по границам. Пень и дерево используют одну реализацию.
@@ -57,5 +62,15 @@ public:
         std::span<const std::size_t> object_ids,
         std::span<const std::size_t> feature_ids,
         SplitCriterion criterion,
-        std::size_t min_samples_leaf) const;
+        std::size_t min_samples_leaf,
+        std::span<const std::size_t> counts = {}) const;
+
+    FeatureSplitResult find_for_feature(
+        const Matrix &X,
+        std::span<const double> y,
+        std::span<const std::size_t> object_ids,
+        std::size_t feature,
+        SplitCriterion criterion,
+        std::size_t min_samples_leaf,
+        std::span<const std::size_t> counts = {}) const;
 };

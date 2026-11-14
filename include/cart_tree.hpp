@@ -11,6 +11,22 @@
 #include <memory>
 #include <span>
 #include <vector>
+#include <cstdint>
+#include <random>
+#include <optional>
+
+enum class FeatureMode
+{
+    All,
+    Sqrt,
+    Count
+};
+
+struct FeatureSearchParams
+{
+    FeatureMode mode = FeatureMode::All;
+    std::size_t count = 1; // используется только для Count
+};
 
 /** @brief Размер и фактическая глубина обученного дерева. */
 struct TreeStats
@@ -48,9 +64,13 @@ private:
 
     SplitCriterion criterion_;
 
-    std::size_t max_depth_;
+    std::optional<std::size_t> max_depth_;
     std::size_t min_samples_split_;
     std::size_t min_samples_leaf_;
+
+    FeatureSearchParams feature_search_;
+    std::uint32_t random_state_;
+    std::mt19937 rng_;
 
     std::size_t n_features_ = 0;
 
@@ -58,16 +78,27 @@ private:
 
     std::vector<double> classes_;
 
+    std::size_t resolve_max_features(std::size_t d) const;
+
+    std::optional<Split> find_node_split(
+        const Matrix &X,
+        std::span<const double> y,
+        const std::vector<std::size_t> &object_ids,
+        const std::vector<std::size_t> &feature_ids,
+        std::span<const std::size_t> counts);
+
     std::unique_ptr<Node> build_tree(
         const Matrix &X,
         std::span<const double> y,
         const std::vector<std::size_t> &object_ids,
         const std::vector<std::size_t> &feature_ids,
-        std::size_t depth);
+        std::size_t depth,
+        std::span<const std::size_t> counts);
 
     std::unique_ptr<Node> make_leaf(
         std::span<const double> y,
-        const std::vector<std::size_t> &object_ids);
+        const std::vector<std::size_t> &object_ids,
+        std::span<const std::size_t> counts);
 
     void collect_stats(
         const Node *node,
@@ -90,9 +121,11 @@ public:
      */
     CartTree(
         SplitCriterion criterion,
-        std::size_t max_depth,
+        std::optional<std::size_t> max_depth,
         std::size_t min_samples_split,
-        std::size_t min_samples_leaf);
+        std::size_t min_samples_leaf,
+        FeatureSearchParams feature_search = {},
+        std::uint32_t random_state = 0);
 
     /** @brief Проверяет обучение, число столбцов и конечность всех признаков.
      * @param X Матрица предсказания; ноль строк допустим.
@@ -112,6 +145,11 @@ public:
      * через classes(). Данные X/y не сохраняются как невладеющие представления.
      */
     void fit(const Matrix &X, std::span<const double> y);
+
+    void fit_with_counts(
+        const Matrix &X,
+        std::span<const double> y,
+        std::span<const std::size_t> counts);
 
     /** @brief Находит лист по правилу X(row, feature) <= threshold влево.
      * @param X Матрица с обучающим числом и порядком столбцов.
@@ -147,6 +185,5 @@ public:
      * @return Не более limit разбиений; у одного листа вектор пуст.
      * @throws std::logic_error Дерево не обучено.
      */
-    std::vector<SplitInfo> first_splits(
-        std::size_t limit) const;
+    std::vector<SplitInfo> first_splits(std::size_t limit) const;
 };
