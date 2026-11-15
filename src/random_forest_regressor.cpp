@@ -1,4 +1,5 @@
 #include "random_forest_regressor.hpp"
+#include "forest_tasks.hpp"
 
 #include <stdexcept>
 #include <cmath>
@@ -123,6 +124,16 @@ void RandomForestRegressor::fit(
 
     for (std::size_t i = 0; i < params_.n_estimators; ++i)
     {
+        new_trees.emplace_back(
+            params_.max_depth,
+            params_.min_samples_split,
+            params_.min_samples_leaf,
+            params_.max_features,
+            seeds[i]);
+    }
+
+    const auto train_tree = [&](std::size_t i)
+    {
         std::mt19937 tree_rng(seeds[i]);
         std::vector<std::size_t> counts(n, 0);
 
@@ -141,17 +152,10 @@ void RandomForestRegressor::fit(
             }
         }
 
-        CartRegressor tree(
-            params_.max_depth,
-            params_.min_samples_split,
-            params_.min_samples_leaf,
-            params_.max_features,
-            seeds[i]);
+        new_trees[i].fit_with_counts(X, y, counts);
+    };
+    forest_detail::run_tasks(new_trees.size(), params_.n_jobs, train_tree);
 
-        tree.fit_with_counts(X, y, counts);
-
-        new_trees.push_back(std::move(tree));
-    }
     trees_ = std::move(new_trees);
 }
 
@@ -163,10 +167,13 @@ std::vector<double> RandomForestRegressor::predict(
 
     std::vector<double> result(X.rows(), 0.0);
 
-    for (const CartRegressor &tree : trees_)
-    {
-        std::vector<double> predictions = tree.predict(X);
+    std::vector<std::vector<double>> tree_predictions(trees_.size());
 
+    forest_detail::run_tasks(trees_.size(), params_.n_jobs, [&](std::size_t i)
+                             { tree_predictions[i] = trees_[i].predict(X); });
+
+    for (const auto &predictions : tree_predictions)
+    {
         for (std::size_t j = 0; j < X.rows(); ++j)
         {
             result[j] += predictions[j];
@@ -177,5 +184,17 @@ std::vector<double> RandomForestRegressor::predict(
     {
         value /= trees_.size();
     }
+    return result;
+}
+
+std::vector<TreeStats> RandomForestRegressor::tree_stats() const
+{
+    if (trees_.empty())
+        throw std::logic_error("Случайный лес не обучен");
+
+    std::vector<TreeStats> result;
+    result.reserve(trees_.size());
+    for (const auto &tree : trees_)
+        result.push_back(tree.stats());
     return result;
 }

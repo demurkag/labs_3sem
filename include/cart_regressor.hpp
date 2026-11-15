@@ -26,10 +26,12 @@ private:
 
 public:
     /** @brief Создаёт необученный регрессор.
-     * @param max_depth Максимальная глубина в рёбрах, 0 означает один лист.
+     * @param max_depth Максимальная глубина в рёбрах; nullopt без предела, 0 один лист.
      * @param min_samples_split Минимум объектов для попытки разбиения, не меньше 2.
      * @param min_samples_leaf Минимум объектов с каждой стороны порога, не меньше 1.
-     * @throws std::invalid_argument Недопустимые минимумы объектов.
+     * @param feature_search Политика признаков в каждом узле, по умолчанию All.
+     * @param random_state Seed RNG признаков, по умолчанию 0; сбрасывается при обучении.
+     * @throws std::invalid_argument Неверные минимумы, режим признаков или Count=0.
      */
     CartRegressor(
         std::optional<std::size_t> max_depth,
@@ -50,6 +52,19 @@ public:
         const Matrix &X,
         std::span<const double> y) override;
 
+    /** @brief Обучает CART с bootstrap-кратностями; обычный fit задаёт единицы.
+     * @param X Непустая конечная матрица n x d, d >= 1.
+     * @param y Ровно n конечных откликов.
+     * @param counts Ровно n целых кратностей исходных строк; хотя бы одна >0.
+     * Нули исключают индексы. Массив не меняется и не сохраняется по ссылке.
+     * @throws std::invalid_argument Неверные размеры, все counts нулевые,
+     * неконечный вход или Count>d.
+     * @throws std::runtime_error Неконечная оценка разбиения.
+     * @throws std::overflow_error Неконечное среднее листа.
+     * @throws std::logic_error Нарушена форма узла.
+     * @note Критерии и средние взвешены, минимумы размеров считаются по разным
+     * исходным индексам. Неудача сбрасывает обучение. См. CartTree::fit_with_counts.
+     */
     void fit_with_counts(
         const Matrix &X,
         std::span<const double> y,

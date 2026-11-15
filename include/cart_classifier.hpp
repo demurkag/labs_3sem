@@ -24,10 +24,12 @@ private:
 
 public:
     /** @brief Создаёт необученный классификатор.
-     * @param max_depth Максимальная глубина в рёбрах, 0 допускает только лист.
+     * @param max_depth Максимальная глубина в рёбрах; nullopt без предела, 0 один лист.
      * @param min_samples_split Минимум объектов для попытки разбиения, не меньше 2.
      * @param min_samples_leaf Минимум объектов с каждой стороны порога, не меньше 1.
-     * @throws std::invalid_argument Недопустимые минимумы объектов.
+     * @param feature_search Политика признаков в каждом узле, по умолчанию All.
+     * @param random_state Seed RNG признаков, по умолчанию 0; сбрасывается при обучении.
+     * @throws std::invalid_argument Неверные минимумы, режим признаков или Count=0.
      */
     CartClassifier(
         std::optional<std::size_t> max_depth,
@@ -48,6 +50,19 @@ public:
         const Matrix &X,
         std::span<const double> y) override;
 
+    /** @brief Обучает CART с целочисленными bootstrap-кратностями.
+     * @param X Непустая конечная матрица n x d, d >= 1.
+     * @param y Ровно n конечных исходных меток; classes включает всё y.
+     * @param counts Ровно n кратностей исходных строк, хотя бы одна >0;
+     * нули исключают индексы, отсутствующему классу соответствует вероятность 0.
+     * Массив не изменяется и не сохраняется по ссылке.
+     * @throws std::invalid_argument Неверные размеры, все counts нулевые,
+     * неконечный вход или Count>d.
+     * @throws std::runtime_error Неконечная оценка разбиения.
+     * @throws std::logic_error Нарушена форма узла.
+     * @note Gini и частоты взвешены, минимумы размеров считаются по разным
+     * исходным индексам. Неудача сбрасывает обучение. См. CartTree::fit_with_counts.
+     */
     void fit_with_counts(
         const Matrix &X,
         std::span<const double> y,
@@ -63,7 +78,7 @@ public:
     std::vector<double> predict(
         const Matrix &X) const override;
 
-    /** @brief Возвращает частоты классов в достигнутых листьях.
+    /** @brief Возвращает взвешенные частоты классов в достигнутых листьях.
      * @param X Конечные признаки с обучающим числом и порядком столбцов.
      * @return Матрица RowMajor X.rows() x classes().size(); столбец c соответствует
      * classes()[c]. Отсутствующий в листе класс имеет вероятность 0.

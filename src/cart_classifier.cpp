@@ -77,7 +77,6 @@ Matrix CartClassifier::predict_proba(
             result(i, c) = leaf.probabilities[c];
         }
     }
-
     return result;
 }
 

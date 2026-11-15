@@ -4,6 +4,7 @@
 #include "exceptions.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <concepts>
@@ -12,6 +13,7 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -886,6 +888,278 @@ void test_layout_equivalence()
             assert(almost_equal(pa(i, j), pb(i, j)));
 }
 
+std::optional<Split> slow_weighted_best_split(
+    const Matrix &x, const std::vector<double> &y,
+    const std::vector<std::size_t> &rows,
+    std::vector<std::size_t> features, SplitCriterion criterion,
+    std::size_t min_leaf, const std::vector<std::size_t> &counts)
+{
+    if (criterion == SplitCriterion::Gini &&
+        std::all_of(rows.begin(), rows.end(), [&](std::size_t i)
+                    { return y[i] == y[rows.front()]; }))
+        return std::nullopt;
+
+    std::sort(features.begin(), features.end());
+    std::optional<Split> best;
+    for (std::size_t feature : features)
+    {
+        std::vector<double> values;
+        for (std::size_t i : rows)
+            values.push_back(x(i, feature));
+        std::sort(values.begin(), values.end());
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+        for (std::size_t k = 1; k < values.size(); ++k)
+        {
+            double threshold = std::midpoint(values[k - 1], values[k]);
+            if (threshold == values[k])
+                threshold = values[k - 1];
+            std::vector<double> left, right;
+            std::size_t left_indices = 0, right_indices = 0;
+            for (std::size_t i : rows)
+            {
+                assert(counts[i] > 0);
+                if (x(i, feature) <= threshold)
+                {
+                    ++left_indices;
+                    left.insert(left.end(), counts[i], y[i]);
+                }
+                else
+                {
+                    ++right_indices;
+                    right.insert(right.end(), counts[i], y[i]);
+                }
+            }
+            if (left_indices < min_leaf || right_indices < min_leaf)
+                continue;
+            const double score = group_score(left, criterion) + group_score(right, criterion);
+            if (!best || score > best->score)
+                best = Split{feature, threshold, score};
+        }
+    }
+    return best;
+}
+
+void test_weighted_split_finder()
+{
+    const std::vector<double> y{0, 0, 1, 1, 0, 1};
+    const std::vector<std::size_t> features{1, 0};
+    const std::vector<std::vector<std::size_t>> plans{
+        {1, 1, 1, 1, 1, 1}, {1, 1, 1, 1, 4, 1}, {1, 0, 2, 1, 4, 0}, {4, 0, 0, 0, 0, 5}};
+    for (Layout layout : {Layout::RowMajor, Layout::ColumnMajor})
+    {
+        Matrix x = make_matrix({{0, 0}, {1, 1}, {2, 0}, {3, 1}, {4, 0}, {5, 1}}, layout);
+        for (SplitCriterion criterion : {SplitCriterion::Gini, SplitCriterion::Variance})
+            for (const auto &counts : plans)
+            {
+                std::vector<std::size_t> rows;
+                for (std::size_t i : {5u, 1u, 3u, 0u, 4u, 2u})
+                    if (counts[i] > 0)
+                        rows.push_back(i);
+                for (std::size_t min_leaf : {1u, 2u, 3u, 4u})
+                {
+                    const auto expected = slow_weighted_best_split(
+                        x, y, rows, features, criterion, min_leaf, counts);
+                    const auto actual = SplitFinder{}.find_best(
+                        x, y, rows, features, criterion, min_leaf, counts);
+                    assert(actual.has_value() == expected.has_value());
+                    if (expected)
+                    {
+                        assert(actual->feature == expected->feature);
+                        assert(almost_equal(actual->threshold, expected->threshold));
+                        assert(almost_equal(actual->score, expected->score));
+                        for (std::size_t i : rows)
+                            assert((x(i, actual->feature) <= actual->threshold) ==
+                                   (x(i, expected->feature) <= expected->threshold));
+                    }
+                    if (rows.size() < 2 * min_leaf)
+                        assert(!actual);
+                }
+            }
+        const std::vector<std::size_t> rows{0, 1, 2, 3, 4, 5};
+        for (SplitCriterion criterion : {SplitCriterion::Gini, SplitCriterion::Variance})
+        {
+            const auto unit = slow_weighted_best_split(x, y, rows, features, criterion, 1, plans[0]);
+            const auto weighted = slow_weighted_best_split(x, y, rows, features, criterion, 1, plans[1]);
+            assert(unit && weighted && unit->feature == 0 && weighted->feature == 0);
+            assert(almost_equal(unit->threshold, 1.5));
+            assert(almost_equal(weighted->threshold, 4.5));
+        }
+    }
+}
+
+void assert_tree_shape(TreeStats stats, std::size_t nodes,
+                       std::size_t leaves, std::size_t depth)
+{
+    assert(stats.node_count == nodes && stats.leaf_count == leaves && stats.depth == depth);
+}
+
+void test_features_selected_per_node()
+{
+    std::mt19937 rng(3);
+    for (std::size_t first : {0u, 1u, 0u})
+    {
+        std::array<std::size_t, 2> order{0, 1};
+        std::shuffle(order.begin(), order.end(), rng);
+        assert(order.front() == first);
+    }
+    const std::vector<double> y{0, 1, 0, 1, 2, 3, 2, 3};
+    for (Layout layout : {Layout::RowMajor, Layout::ColumnMajor})
+    {
+        Matrix x = make_matrix({{0, 0}, {0, 1}, {1, 0}, {1, 1}, {2, 0}, {2, 1}, {3, 0}, {3, 1}}, layout);
+        for (SplitCriterion criterion : {SplitCriterion::Gini, SplitCriterion::Variance})
+        {
+            const auto old_candidate = slow_best_split(x, y, {0, 1, 2, 3}, {0}, criterion, 1);
+            assert(old_candidate && almost_equal(old_candidate->threshold, 0.5));
+        }
+        CartRegressor r(2, 2, 1, {FeatureMode::Count, 1}, 3);
+        CartClassifier c(2, 2, 1, {FeatureMode::Count, 1}, 3);
+        r.fit(x, y);
+        c.fit(x, y);
+        for (const auto &splits : {r.first_splits(10), c.first_splits(10)})
+        {
+            assert(splits.size() == 3);
+            for (std::size_t i = 0; i < splits.size(); ++i)
+            {
+                assert(splits[i].feature == (i == 1 ? 1u : 0u));
+                assert(splits[i].depth == (i == 0 ? 0u : 1u));
+                assert(almost_equal(splits[i].threshold, i == 0 ? 1.5 : (i == 1 ? 0.5 : 2.5)));
+            }
+        }
+        assert_tree_shape(r.stats(), 7, 4, 2);
+        assert_tree_shape(c.stats(), 7, 4, 2);
+        assert_vectors_equal(r.predict(x), std::vector<double>{0, 1, 0, 1, 2.5, 2.5, 2.5, 2.5});
+        assert_vectors_equal(c.predict(x), std::vector<double>{0, 1, 0, 1, 2, 2, 2, 2});
+    }
+}
+
+void test_constant_feature_fallback()
+{
+    std::mt19937 rng(3);
+    std::array<std::size_t, 2> order{0, 1};
+    std::shuffle(order.begin(), order.end(), rng);
+    assert(order.front() == 0);
+    const std::vector<double> y{10, 10, 42, 42};
+    for (Layout layout : {Layout::RowMajor, Layout::ColumnMajor})
+    {
+        Matrix x = make_matrix({{7, 0}, {7, 1}, {7, 2}, {7, 3}}, layout);
+        CartRegressor r(1, 2, 1, {FeatureMode::Count, 1}, 3);
+        CartClassifier c(1, 2, 1, {FeatureMode::Count, 1}, 3);
+        r.fit(x, y);
+        c.fit(x, y);
+        assert_tree_shape(r.stats(), 3, 2, 1);
+        assert_tree_shape(c.stats(), 3, 2, 1);
+        for (const auto &splits : {r.first_splits(10), c.first_splits(10)})
+        {
+            assert(splits.size() == 1 && splits[0].feature == 1 && splits[0].depth == 0);
+            assert(almost_equal(splits[0].threshold, 1.5));
+        }
+        assert_vectors_equal(r.predict(x), y);
+        assert_vectors_equal(c.predict(x), y);
+    }
+}
+
+void test_zero_gain_split()
+{
+    const std::vector<double> y{0, 1, 1, 0};
+    for (Layout layout : {Layout::RowMajor, Layout::ColumnMajor})
+    {
+        Matrix x = make_matrix({{0, 0}, {0, 1}, {1, 0}, {1, 1}}, layout);
+        const auto impurity = [](const std::vector<double> &values, bool gini)
+        {
+            if (gini)
+            {
+                std::map<double, std::size_t> frequencies;
+                for (double value : values)
+                    ++frequencies[value];
+                double result = 1;
+                for (const auto &[label, count] : frequencies)
+                {
+                    (void)label;
+                    const double p = static_cast<double>(count) / values.size();
+                    result -= p * p;
+                }
+                return result;
+            }
+            const double mean = std::accumulate(values.begin(), values.end(), 0.0) / values.size();
+            double result = 0;
+            for (double value : values)
+                result += (value - mean) * (value - mean);
+            return result / values.size();
+        };
+        for (bool gini : {false, true})
+        {
+            const double parent = impurity(y, gini);
+            assert(almost_equal(parent, gini ? 0.5 : 0.25));
+            assert(parent > 0);
+            for (std::size_t feature : {0u, 1u})
+            {
+                std::vector<double> left, right;
+                for (std::size_t i = 0; i < y.size(); ++i)
+                    (x(i, feature) <= 0.5 ? left : right).push_back(y[i]);
+                const double children = (left.size() * impurity(left, gini) +
+                                         right.size() * impurity(right, gini)) /
+                                        y.size();
+                assert(almost_equal(parent - children, 0));
+            }
+        }
+        CartRegressor r(2, 2, 1, {FeatureMode::All, 1});
+        CartClassifier c(2, 2, 1, {FeatureMode::All, 1});
+        r.fit(x, y);
+        c.fit(x, y);
+        assert_tree_shape(r.stats(), 7, 4, 2);
+        assert_tree_shape(c.stats(), 7, 4, 2);
+        assert_vectors_equal(r.predict(x), y);
+        assert_vectors_equal(c.predict(x), y);
+        assert_vectors_equal(c.classes(), std::vector<double>{0, 1});
+        const Matrix probabilities = c.predict_proba(x);
+        assert(probabilities.rows() == 4 && probabilities.cols() == 2);
+        for (std::size_t i = 0; i < y.size(); ++i)
+            for (std::size_t label = 0; label < 2; ++label)
+                assert(almost_equal(probabilities(i, label), y[i] == label ? 1 : 0));
+    }
+}
+
+void test_unit_counts_match_fit()
+{
+    const std::vector<double> y{10, 10, 30, 30, 10, 10, 30, 30};
+    const std::vector<std::size_t> counts(y.size(), 1);
+    for (Layout layout : {Layout::RowMajor, Layout::ColumnMajor})
+    {
+        Matrix x = make_matrix({{1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}}, layout);
+        CartRegressor r(3, 2, 1), weighted_r(3, 2, 1);
+        CartClassifier c(3, 2, 1), weighted_c(3, 2, 1);
+        r.fit(x, y);
+        c.fit(x, y);
+        weighted_r.fit_with_counts(x, y, counts);
+        weighted_c.fit_with_counts(x, y, counts);
+        for (TreeStats stats : {r.stats(), c.stats(), weighted_r.stats(), weighted_c.stats()})
+            assert_tree_shape(stats, 7, 4, 3);
+        for (const auto &prediction : {r.predict(x), c.predict(x), weighted_r.predict(x), weighted_c.predict(x)})
+            assert_vectors_equal(prediction, y);
+        const auto compare_splits = [](const auto &a, const auto &b)
+        {
+            assert(a.size() == 3 && a.size() == b.size());
+            for (std::size_t i = 0; i < a.size(); ++i)
+            {
+                assert(a[i].feature == b[i].feature && a[i].depth == b[i].depth);
+                assert(almost_equal(a[i].threshold, b[i].threshold));
+            }
+        };
+        compare_splits(r.first_splits(10), weighted_r.first_splits(10));
+        compare_splits(c.first_splits(10), weighted_c.first_splits(10));
+        assert_vectors_equal(c.classes(), weighted_c.classes());
+        assert_vectors_equal(weighted_c.classes(), std::vector<double>{10, 30});
+        const Matrix a = c.predict_proba(x), b = weighted_c.predict_proba(x);
+        assert(a.rows() == y.size() && a.cols() == 2 && b.rows() == a.rows() && b.cols() == a.cols());
+        for (std::size_t i = 0; i < y.size(); ++i)
+            for (std::size_t j = 0; j < a.cols(); ++j)
+            {
+                assert(almost_equal(a(i, j), b(i, j)));
+                assert(almost_equal(b(i, j), y[i] == (j == 0 ? 10 : 30) ? 1 : 0));
+            }
+    }
+}
+
 int main()
 {
     // Проверка срезов строк и столбцов при RowMajor и ColumnMajor:
@@ -949,5 +1223,11 @@ int main()
     // совпадение разбиений, статистики деревьев, предсказаний
     // и вероятностей классов с учётом погрешности double.
     test_layout_equivalence();
-    std::cout << "Все 13 тестов CART прошли успешно\n";
+
+    test_weighted_split_finder();
+    test_features_selected_per_node();
+    test_constant_feature_fallback();
+    test_zero_gain_split();
+    test_unit_counts_match_fit();
+    std::cout << "Все тесты CART прошли успешно\n";
 }

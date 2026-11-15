@@ -5,6 +5,8 @@ project(labs VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(Threads REQUIRED)
+
 add_library(core STATIC
     src/dataset.cpp
     src/matrix.cpp
@@ -15,6 +17,7 @@ add_library(core STATIC
     src/cart_classifier.cpp
     src/cart_regressor.cpp
     src/random_forest_regressor.cpp
+    src/random_forest_classifier.cpp
 )
 
 target_include_directories(core
@@ -23,6 +26,7 @@ target_include_directories(core
 )
 
 target_compile_options(core PRIVATE -Wall -Wextra)
+target_link_libraries(core PUBLIC Threads::Threads)
 
 # Лабораторная №1
 add_executable(app
@@ -56,6 +60,19 @@ add_custom_target(run_lab3
     VERBATIM
 )
 
+# Лабораторная №4
+add_executable(lab4 src/lab4_main.cpp)
+target_link_libraries(lab4 PRIVATE core)
+target_compile_options(lab4 PRIVATE -Wall -Wextra)
+target_compile_definitions(lab4 PRIVATE LAB4_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+add_custom_target(run_lab4
+    COMMAND $<TARGET_FILE:lab4>
+    DEPENDS lab4
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    USES_TERMINAL
+    VERBATIM
+)
+
 # Тесты
 add_executable(tests
     tests/tests.cpp
@@ -72,14 +89,19 @@ add_executable(test_cart tests/test_cart.cpp)
 target_link_libraries(test_cart PRIVATE core)
 target_compile_options(test_cart PRIVATE -Wall -Wextra)
 
+add_executable(test_random_forest tests/test_random_forest.cpp)
+target_link_libraries(test_random_forest PRIVATE core)
+target_compile_options(test_random_forest PRIVATE -Wall -Wextra)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tests PRIVATE -UNDEBUG)
     target_compile_options(test_decision_stump PRIVATE -UNDEBUG)
     target_compile_options(test_cart PRIVATE -UNDEBUG)
+    target_compile_options(test_random_forest PRIVATE -UNDEBUG)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    foreach(target core app lab2 lab2_gini lab2_variance lab3 tests test_decision_stump test_cart)
+    foreach(target core app lab2 lab2_gini lab2_variance lab3 lab4 tests test_decision_stump test_cart test_random_forest)
         target_compile_options(${target} PRIVATE
             -fsanitize=address,undefined
             -fno-omit-frame-pointer
@@ -94,6 +116,7 @@ enable_testing()
 add_test(NAME unit COMMAND tests)
 add_test(NAME decision_stump COMMAND test_decision_stump)
 add_test(NAME cart COMMAND test_cart)
+add_test(NAME random_forest COMMAND test_random_forest)
 
 # Документация не входит в обычную сборку и не требует Graphviz.
 find_package(Doxygen QUIET)
